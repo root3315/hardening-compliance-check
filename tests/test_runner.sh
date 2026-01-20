@@ -1,0 +1,554 @@
+#!/usr/bin/env bash
+#
+# test_runner.sh - Test runner for hardening compliance checker
+# Runs unit tests and integration tests for the compliance checker
+#
+# Usage: ./test_runner.sh [OPTIONS]
+#
+# Options:
+#   -v, --verbose    Show detailed test output
+#   -h, --help       Show help message
+#
+
+set -uo pipefail
+
+# Test counters
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+TESTS_SKIPPED=0
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source the library modules
+source "${PROJECT_DIR}/lib/utils.sh"
+source "${PROJECT_DIR}/lib/config.sh"
+
+# Verbose mode
+VERBOSE=false
+
+# Print test header
+print_test_header() {
+    echo ""
+    if supports_color; then
+        echo -e "${COLOR_BOLD}${COLOR_YELLOW}========================================${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}${COLOR_YELLOW}  Running: $1${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}${COLOR_YELLOW}========================================${COLOR_RESET}"
+    else
+        echo "========================================"
+        echo "  Running: $1"
+        echo "========================================"
+    fi
+    echo ""
+}
+
+# Assert equality
+assert_equals() {
+    local expected="$1"
+    local actual="$2"
+    local message="${3:-}"
+    
+    ((TESTS_RUN++))
+    
+    if [[ "$expected" == "$actual" ]]; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "assert_equals: $message"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "assert_equals: $message"
+        echo "  Expected: '$expected'"
+        echo "  Actual:   '$actual'"
+        return 1
+    fi
+}
+
+# Assert not equals
+assert_not_equals() {
+    local expected="$1"
+    local actual="$2"
+    local message="${3:-}"
+    
+    ((TESTS_RUN++))
+    
+    if [[ "$expected" != "$actual" ]]; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "assert_not_equals: $message"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "assert_not_equals: $message"
+        echo "  Expected not: '$expected'"
+        echo "  Actual:       '$actual'"
+        return 1
+    fi
+}
+
+# Assert true
+assert_true() {
+    local condition="$1"
+    local message="${2:-}"
+    
+    ((TESTS_RUN++))
+    
+    if eval "$condition"; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "assert_true: $message"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "assert_true: $message"
+        echo "  Condition: $condition"
+        return 1
+    fi
+}
+
+# Assert false
+assert_false() {
+    local condition="$1"
+    local message="${2:-}"
+    
+    ((TESTS_RUN++))
+    
+    if ! eval "$condition"; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "assert_false: $message"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "assert_false: $message"
+        echo "  Condition: $condition"
+        return 1
+    fi
+}
+
+# Assert file exists
+assert_file_exists() {
+    local file="$1"
+    local message="${2:-File should exist}"
+    
+    ((TESTS_RUN++))
+    
+    if [[ -f "$file" ]]; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "$message: $file"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "$message: $file"
+        return 1
+    fi
+}
+
+# Assert command exists
+assert_command_exists() {
+    local cmd="$1"
+    local message="${2:-Command should exist}"
+    
+    ((TESTS_RUN++))
+    
+    if command -v "$cmd" &>/dev/null; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "$message: $cmd"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "$message: $cmd"
+        return 1
+    fi
+}
+
+# Assert exit code
+assert_exit_code() {
+    local expected="$1"
+    local actual="$2"
+    local message="${3:-}"
+    
+    ((TESTS_RUN++))
+    
+    if [[ "$expected" == "$actual" ]]; then
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "assert_exit_code: $message"
+        fi
+        return 0
+    else
+        ((TESTS_FAILED++))
+        log_error "assert_exit_code: $message"
+        echo "  Expected: $expected"
+        echo "  Actual:   $actual"
+        return 1
+    fi
+}
+
+# Skip a test
+skip_test() {
+    local message="$1"
+    ((TESTS_SKIPPED++))
+    log_warning "SKIPPED: $message"
+}
+
+# Test utility functions
+test_utils() {
+    print_test_header "Utility Functions Tests"
+    
+    # Test trim function
+    local trimmed
+    trimmed=$(trim "  hello world  ")
+    assert_equals "hello world" "$trimmed" "trim removes whitespace"
+    
+    # Test to_lower function
+    local lowered
+    lowered=$(to_lower "HELLO")
+    assert_equals "hello" "$lowered" "to_lower converts to lowercase"
+    
+    # Test to_upper function
+    local uppered
+    uppered=$(to_upper "hello")
+    assert_equals "HELLO" "$uppered" "to_upper converts to uppercase"
+    
+    # Test contains function
+    assert_true 'contains "hello world" "world"' "contains finds substring"
+    assert_false 'contains "hello world" "foo"' "contains returns false for missing substring"
+    
+    # Test starts_with function
+    assert_true 'starts_with "hello world" "hello"' "starts_with finds prefix"
+    assert_false 'starts_with "hello world" "world"' "starts_with returns false for wrong prefix"
+    
+    # Test ends_with function
+    assert_true 'ends_with "hello world" "world"' "ends_with finds suffix"
+    assert_false 'ends_with "hello world" "hello"' "ends_with returns false for wrong suffix"
+    
+    # Test timestamp function
+    local ts
+    ts=$(timestamp)
+    assert_not_equals "" "$ts" "timestamp returns non-empty value"
+    
+    # Test calc_percentage function
+    local pct
+    pct=$(calc_percentage 75 100)
+    assert_equals "75" "$pct" "calc_percentage calculates correctly"
+    
+    pct=$(calc_percentage 0 100)
+    assert_equals "0" "$pct" "calc_percentage handles zero numerator"
+}
+
+# Test config values
+test_config() {
+    print_test_header "Configuration Tests"
+    
+    # Test script version is set
+    assert_not_equals "" "$SCRIPT_VERSION" "SCRIPT_VERSION is set"
+    
+    # Test script name is set
+    assert_equals "hardening-compliance-check" "$SCRIPT_NAME" "SCRIPT_NAME is correct"
+    
+    # Test SSH config path
+    assert_not_equals "" "$SSH_CONFIG" "SSH_CONFIG path is set"
+    
+    # Test SSH benchmarks are populated
+    assert_not_equals "" "${#SSH_BENCHMARKS[@]}" "SSH_BENCHMARKS has entries"
+    
+    # Test kernel benchmarks are populated
+    assert_not_equals "" "${#KERNEL_BENCHMARKS[@]}" "KERNEL_BENCHMARKS has entries"
+    
+    # Test file permission benchmarks
+    assert_not_equals "" "${#FILE_PERM_BENCHMARKS[@]}" "FILE_PERM_BENCHMARKS has entries"
+    
+    # Test specific benchmark values
+    assert_equals "no" "${SSH_BENCHMARKS[PermitRootLogin]}" "PermitRootLogin benchmark is 'no'"
+    assert_equals "0" "${KERNEL_BENCHMARKS[net.ipv4.ip_forward]}" "ip_forward benchmark is '0'"
+    assert_equals "600" "${FILE_PERM_BENCHMARKS[/etc/shadow]}" "/etc/shadow perms is '600'"
+    
+    # Test severity levels
+    assert_equals "critical" "${SSH_SEVERITY[PermitRootLogin]}" "PermitRootLogin severity is critical"
+    assert_equals "critical" "${KERNEL_SEVERITY[kernel.randomize_va_space]}" "ASLR severity is critical"
+}
+
+# Test helper functions
+test_helpers() {
+    print_test_header "Helper Function Tests"
+    
+    # Test command_exists
+    assert_true 'command_exists bash' "command_exists finds bash"
+    assert_false 'command_exists nonexistent_command_xyz' "command_exists returns false for missing command"
+    
+    # Test file_exists with existing file
+    assert_true 'file_exists /etc/passwd' "file_exists finds /etc/passwd"
+    assert_false 'file_exists /nonexistent_file_xyz' "file_exists returns false for missing file"
+    
+    # Test get_file_perms
+    local perms
+    perms=$(get_file_perms /etc/passwd)
+    assert_not_equals "" "$perms" "get_file_perms returns value for /etc/passwd"
+    
+    # Test get_distribution
+    local dist
+    dist=$(get_distribution)
+    assert_not_equals "" "$dist" "get_distribution returns value"
+    
+    # Test is_distribution
+    # This will vary by system, just test it runs
+    local result
+    result=$(is_distribution "ubuntu" && echo "true" || echo "false")
+    assert_not_equals "" "$result" "is_distribution runs without error"
+}
+
+# Test main script exists and is executable
+test_script_structure() {
+    print_test_header "Script Structure Tests"
+    
+    # Test main script exists
+    assert_file_exists "${PROJECT_DIR}/hardening-compliance-check.sh" "Main script exists"
+    
+    # Test lib files exist
+    assert_file_exists "${PROJECT_DIR}/lib/utils.sh" "utils.sh exists"
+    assert_file_exists "${PROJECT_DIR}/lib/config.sh" "config.sh exists"
+    assert_file_exists "${PROJECT_DIR}/lib/checks.sh" "checks.sh exists"
+    
+    # Test scripts have shebang
+    local shebang
+    shebang=$(head -n1 "${PROJECT_DIR}/hardening-compliance-check.sh")
+    assert_equals "#!/usr/bin/env bash" "$shebang" "Main script has correct shebang"
+    
+    shebang=$(head -n1 "${PROJECT_DIR}/lib/utils.sh")
+    assert_equals "#!/usr/bin/env bash" "$shebang" "utils.sh has correct shebang"
+    
+    # Test scripts are syntactically valid
+    local syntax_check
+    if bash -n "${PROJECT_DIR}/hardening-compliance-check.sh" 2>/dev/null; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "Main script syntax is valid"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "Main script has syntax errors"
+    fi
+    
+    if bash -n "${PROJECT_DIR}/lib/utils.sh" 2>/dev/null; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "utils.sh syntax is valid"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "utils.sh has syntax errors"
+    fi
+    
+    if bash -n "${PROJECT_DIR}/lib/config.sh" 2>/dev/null; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "config.sh syntax is valid"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "config.sh has syntax errors"
+    fi
+    
+    if bash -n "${PROJECT_DIR}/lib/checks.sh" 2>/dev/null; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "checks.sh syntax is valid"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "checks.sh has syntax errors"
+    fi
+}
+
+# Test help and version output
+test_cli_options() {
+    print_test_header "CLI Options Tests"
+    
+    # Test help output
+    local help_output
+    help_output=$("${PROJECT_DIR}/hardening-compliance-check.sh" --help 2>&1 || true)
+    assert_not_equals "" "$help_output" "Help option produces output"
+    assert_true '[[ "$help_output" == *"USAGE"* ]]' "Help output contains USAGE"
+    assert_true '[[ "$help_output" == *"--help"* ]]' "Help output contains --help"
+    
+    # Test version output
+    local version_output
+    version_output=$("${PROJECT_DIR}/hardening-compliance-check.sh" --version 2>&1 || true)
+    assert_not_equals "" "$version_output" "Version option produces output"
+    assert_true '[[ "$version_output" == *"version"* ]]' "Version output contains version"
+    
+    # Test list-categories output
+    local categories_output
+    categories_output=$("${PROJECT_DIR}/hardening-compliance-check.sh" --list-categories 2>&1 || true)
+    assert_not_equals "" "$categories_output" "List-categories produces output"
+    assert_true '[[ "$categories_output" == *"ssh_hardening"* ]]' "Categories output contains ssh_hardening"
+}
+
+# Test benchmark counts
+test_benchmark_coverage() {
+    print_test_header "Benchmark Coverage Tests"
+    
+    # Test SSH benchmarks count (should have at least 10)
+    local ssh_count=${#SSH_BENCHMARKS[@]}
+    if [[ $ssh_count -ge 10 ]]; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "SSH benchmarks count: $ssh_count (>= 10)"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "SSH benchmarks count: $ssh_count (< 10)"
+    fi
+    
+    # Test kernel benchmarks count (should have at least 15)
+    local kernel_count=${#KERNEL_BENCHMARKS[@]}
+    if [[ $kernel_count -ge 15 ]]; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "Kernel benchmarks count: $kernel_count (>= 15)"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "Kernel benchmarks count: $kernel_count (< 15)"
+    fi
+    
+    # Test file permission benchmarks count (should have at least 10)
+    local file_count=${#FILE_PERM_BENCHMARKS[@]}
+    if [[ $file_count -ge 10 ]]; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "File permission benchmarks count: $file_count (>= 10)"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "File permission benchmarks count: $file_count (< 10)"
+    fi
+    
+    # Test disabled services count (should have at least 5)
+    local service_count=${#DISABLED_SERVICES[@]}
+    if [[ $service_count -ge 5 ]]; then
+        ((TESTS_RUN++))
+        ((TESTS_PASSED++))
+        if [[ "$VERBOSE" == true ]]; then
+            log_success "Disabled services count: $service_count (>= 5)"
+        fi
+    else
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
+        log_error "Disabled services count: $service_count (< 5)"
+    fi
+}
+
+# Print test summary
+print_summary() {
+    echo ""
+    if supports_color; then
+        echo -e "${COLOR_BOLD}========================================${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}           TEST SUMMARY${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}========================================${COLOR_RESET}"
+    else
+        echo "========================================"
+        echo "           TEST SUMMARY"
+        echo "========================================"
+    fi
+    echo ""
+    echo "  Total tests run:    $TESTS_RUN"
+    print_color "$COLOR_GREEN" "  Passed:             $TESTS_PASSED"
+    print_color "$COLOR_RED" "  Failed:             $TESTS_FAILED"
+    print_color "$COLOR_YELLOW" "  Skipped:            $TESTS_SKIPPED"
+    echo ""
+    
+    local pass_rate=0
+    if [[ $TESTS_RUN -gt 0 ]]; then
+        pass_rate=$(( (TESTS_PASSED * 100) / TESTS_RUN ))
+    fi
+    echo "  Pass rate:          ${pass_rate}%"
+    echo ""
+    
+    if [[ $TESTS_FAILED -eq 0 ]]; then
+        print_color "$COLOR_GREEN" "  All tests passed!"
+        return 0
+    else
+        print_color "$COLOR_RED" "  Some tests failed!"
+        return 1
+    fi
+}
+
+# Parse arguments
+parse_test_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  -v, --verbose    Show detailed test output"
+                echo "  -h, --help       Show this help message"
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Main test runner
+main() {
+    parse_test_args "$@"
+    
+    echo ""
+    if supports_color; then
+        echo -e "${COLOR_BOLD}${COLOR_GREEN}========================================${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}${COLOR_GREEN}  Hardening Compliance Checker Tests${COLOR_RESET}"
+        echo -e "${COLOR_BOLD}${COLOR_GREEN}========================================${COLOR_RESET}"
+    else
+        echo "========================================"
+        echo "  Hardening Compliance Checker Tests"
+        echo "========================================"
+    fi
+    
+    # Run all test suites
+    test_utils
+    test_config
+    test_helpers
+    test_script_structure
+    test_cli_options
+    test_benchmark_coverage
+    
+    # Print summary
+    print_summary
+}
+
+# Run main
+main "$@"
