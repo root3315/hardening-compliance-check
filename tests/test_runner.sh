@@ -406,7 +406,7 @@ test_cli_options() {
 # Test benchmark counts
 test_benchmark_coverage() {
     print_test_header "Benchmark Coverage Tests"
-    
+
     # Test SSH benchmarks count (should have at least 10)
     local ssh_count=${#SSH_BENCHMARKS[@]}
     if [[ $ssh_count -ge 10 ]]; then
@@ -420,7 +420,7 @@ test_benchmark_coverage() {
         ((TESTS_FAILED++))
         log_error "SSH benchmarks count: $ssh_count (< 10)"
     fi
-    
+
     # Test kernel benchmarks count (should have at least 15)
     local kernel_count=${#KERNEL_BENCHMARKS[@]}
     if [[ $kernel_count -ge 15 ]]; then
@@ -434,7 +434,7 @@ test_benchmark_coverage() {
         ((TESTS_FAILED++))
         log_error "Kernel benchmarks count: $kernel_count (< 15)"
     fi
-    
+
     # Test file permission benchmarks count (should have at least 10)
     local file_count=${#FILE_PERM_BENCHMARKS[@]}
     if [[ $file_count -ge 10 ]]; then
@@ -448,7 +448,7 @@ test_benchmark_coverage() {
         ((TESTS_FAILED++))
         log_error "File permission benchmarks count: $file_count (< 10)"
     fi
-    
+
     # Test disabled services count (should have at least 5)
     local service_count=${#DISABLED_SERVICES[@]}
     if [[ $service_count -ge 5 ]]; then
@@ -462,6 +462,98 @@ test_benchmark_coverage() {
         ((TESTS_FAILED++))
         log_error "Disabled services count: $service_count (< 5)"
     fi
+}
+
+# Test input validation functions
+test_input_validation() {
+    print_test_header "Input Validation Tests"
+
+    # Test validate_ssh_boolean
+    assert_true 'validate_ssh_boolean "yes"' "validate_ssh_boolean accepts yes"
+    assert_true 'validate_ssh_boolean "no"' "validate_ssh_boolean accepts no"
+    assert_true 'validate_ssh_boolean "YES"' "validate_ssh_boolean accepts YES"
+    assert_true 'validate_ssh_boolean "NO"' "validate_ssh_boolean accepts NO"
+    assert_false 'validate_ssh_boolean "true"' "validate_ssh_boolean rejects true"
+    assert_false 'validate_ssh_boolean "false"' "validate_ssh_boolean rejects false"
+    assert_false 'validate_ssh_boolean "1"' "validate_ssh_boolean rejects 1"
+    assert_false 'validate_ssh_boolean "0"' "validate_ssh_boolean rejects 0"
+
+    # Test validate_ssh_numeric
+    assert_true 'validate_ssh_numeric "300"' "validate_ssh_numeric accepts 300"
+    assert_true 'validate_ssh_numeric "0"' "validate_ssh_numeric accepts 0"
+    assert_true 'validate_ssh_numeric "9999"' "validate_ssh_numeric accepts 9999"
+    assert_false 'validate_ssh_numeric "-1"' "validate_ssh_numeric rejects negative"
+    assert_false 'validate_ssh_numeric "abc"' "validate_ssh_numeric rejects abc"
+    assert_false 'validate_ssh_numeric "10abc"' "validate_ssh_numeric rejects mixed"
+
+    # Test validate_ssh_crypto
+    assert_true 'validate_ssh_crypto "aes256-ctr"' "validate_ssh_crypto accepts single algo"
+    assert_true 'validate_ssh_crypto "aes256-gcm@openssh.com,chacha20-poly1305@openssh.com"' "validate_ssh_crypto accepts comma-separated"
+    assert_false 'validate_ssh_crypto "aes256;rm -rf /"' "validate_ssh_crypto rejects injection"
+
+    # Test validate_kernel_numeric
+    assert_true 'validate_kernel_numeric "0"' "validate_kernel_numeric accepts 0"
+    assert_true 'validate_kernel_numeric "1"' "validate_kernel_numeric accepts 1"
+    assert_true 'validate_kernel_numeric "-1"' "validate_kernel_numeric accepts -1"
+    assert_true 'validate_kernel_numeric "2"' "validate_kernel_numeric accepts 2"
+    assert_false 'validate_kernel_numeric "abc"' "validate_kernel_numeric rejects abc"
+
+    # Test validate_file_permission
+    assert_true 'validate_file_permission "644"' "validate_file_permission accepts 644"
+    assert_true 'validate_file_permission "600"' "validate_file_permission accepts 600"
+    assert_true 'validate_file_permission "755"' "validate_file_permission accepts 755"
+    assert_true 'validate_file_permission "700"' "validate_file_permission accepts 700"
+    assert_true 'validate_file_permission "0644"' "validate_file_permission accepts 0644"
+    assert_false 'validate_file_permission "888"' "validate_file_permission rejects 888"
+    assert_false 'validate_file_permission "abc"' "validate_file_permission rejects abc"
+    assert_false 'validate_file_permission "64"' "validate_file_permission rejects 64"
+
+    # Test validate_password_numeric
+    assert_true 'validate_password_numeric "90"' "validate_password_numeric accepts 90"
+    assert_true 'validate_password_numeric "0"' "validate_password_numeric accepts 0"
+    assert_false 'validate_password_numeric "-1"' "validate_password_numeric rejects -1"
+    assert_false 'validate_password_numeric "abc"' "validate_password_numeric rejects abc"
+
+    # Test validate_config_value
+    assert_true 'validate_config_value "test" "yes" "boolean"' "validate_config_value accepts valid boolean"
+    assert_true 'validate_config_value "test" "300" "numeric"' "validate_config_value accepts valid numeric"
+    assert_true 'validate_config_value "test" "644" "permission"' "validate_config_value accepts valid permission"
+    assert_false 'validate_config_value "test" "invalid" "boolean"' "validate_config_value rejects invalid boolean"
+    assert_false 'validate_config_value "test" "" "numeric"' "validate_config_value rejects empty"
+
+    # Test sanitize_config_value
+    local sanitized
+    sanitized=$(sanitize_config_value "hello world")
+    assert_equals "hello world" "$sanitized" "sanitize_config_value keeps clean input"
+    
+    sanitized=$(sanitize_config_value 'test;rm -rf /')
+    assert_false '[[ "$sanitized" == *";"* ]]' "sanitize_config_value removes semicolons"
+    
+    sanitized=$(sanitize_config_value 'test$(whoami)')
+    assert_false '[[ "$sanitized" == *"$"* ]]' "sanitize_config_value removes dollar signs"
+
+    # Test validate_file_path
+    assert_true 'validate_file_path "/etc/passwd"' "validate_file_path accepts absolute path"
+    assert_true 'validate_file_path "./config.txt"' "validate_file_path accepts relative path"
+    assert_true 'validate_file_path "filename.txt"' "validate_file_path accepts simple filename"
+    assert_false 'validate_file_path "../../../etc/passwd"' "validate_file_path rejects traversal"
+    assert_false 'validate_file_path "/../etc/passwd"' "validate_file_path rejects root traversal"
+    assert_false 'validate_file_path "-rf /etc/passwd"' "validate_file_path rejects dash prefix"
+
+    # Test validate_category_name
+    assert_true 'validate_category_name "ssh_hardening"' "validate_category_name accepts ssh_hardening"
+    assert_true 'validate_category_name "kernel_hardening"' "validate_category_name accepts kernel_hardening"
+    assert_true 'validate_category_name "file_permissions"' "validate_category_name accepts file_permissions"
+    assert_false 'validate_category_name "SSH_hardening"' "validate_category_name rejects uppercase"
+    assert_false 'validate_category_name "123category"' "validate_category_name rejects numeric start"
+    assert_false 'validate_category_name "cat;rm -rf /"' "validate_category_name rejects injection"
+
+    # Test validate_output_format
+    assert_true 'validate_output_format "text"' "validate_output_format accepts text"
+    assert_true 'validate_output_format "json"' "validate_output_format accepts json"
+    assert_true 'validate_output_format "csv"' "validate_output_format accepts csv"
+    assert_false 'validate_output_format "xml"' "validate_output_format rejects xml"
+    assert_false 'validate_output_format "html"' "validate_output_format rejects html"
 }
 
 # Print test summary
@@ -537,7 +629,7 @@ main() {
         echo "  Hardening Compliance Checker Tests"
         echo "========================================"
     fi
-    
+
     # Run all test suites
     test_utils
     test_config
@@ -545,7 +637,8 @@ main() {
     test_script_structure
     test_cli_options
     test_benchmark_coverage
-    
+    test_input_validation
+
     # Print summary
     print_summary
 }

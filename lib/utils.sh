@@ -372,10 +372,173 @@ format_duration() {
     local seconds="$1"
     local minutes=$((seconds / 60))
     local remaining_seconds=$((seconds % 60))
-    
+
     if [[ $minutes -gt 0 ]]; then
         echo "${minutes}m ${remaining_seconds}s"
     else
         echo "${remaining_seconds}s"
     fi
+}
+
+# ============================================================================
+# Input Validation Functions
+# ============================================================================
+
+# Validate SSH boolean parameter value
+# Returns 0 if valid (yes/no), 1 otherwise
+validate_ssh_boolean() {
+    local value="$1"
+    case "$(to_lower "$value")" in
+        yes|no) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Validate SSH numeric parameter value
+# Returns 0 if valid positive integer, 1 otherwise
+validate_ssh_numeric() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]+$ ]]
+}
+
+# Validate SSH cipher/MAC/Kex algorithm string
+# Returns 0 if valid format, 1 otherwise
+validate_ssh_crypto() {
+    local value="$1"
+    # Allow comma-separated list of algorithm names
+    [[ "$value" =~ ^[a-zA-Z0-9@._+-]+(,[a-zA-Z0-9@._+-]+)*$ ]]
+}
+
+# Validate kernel parameter value (numeric)
+# Returns 0 if valid, 1 otherwise
+validate_kernel_numeric() {
+    local value="$1"
+    [[ "$value" =~ ^-?[0-9]+$ ]]
+}
+
+# Validate file permission value (octal)
+# Returns 0 if valid octal permission, 1 otherwise
+validate_file_permission() {
+    local value="$1"
+    [[ "$value" =~ ^[0-7]{3,4}$ ]]
+}
+
+# Validate password policy numeric value
+# Returns 0 if valid non-negative integer, 1 otherwise
+validate_password_numeric() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]+$ ]]
+}
+
+# Validate config value based on parameter type
+# Args: param_name, value, param_type (boolean|numeric|permission|crypto)
+# Returns 0 if valid, 1 otherwise
+validate_config_value() {
+    local param_name="$1"
+    local value="$2"
+    local param_type="$3"
+
+    if [[ -z "$value" ]]; then
+        return 1
+    fi
+
+    case "$param_type" in
+        boolean)
+            validate_ssh_boolean "$value"
+            ;;
+        numeric)
+            validate_ssh_numeric "$value"
+            ;;
+        permission)
+            validate_file_permission "$value"
+            ;;
+        crypto)
+            validate_ssh_crypto "$value"
+            ;;
+        *)
+            # Unknown type, accept any non-empty value
+            [[ -n "$value" ]]
+            ;;
+    esac
+}
+
+# Sanitize config value (remove dangerous characters)
+# Returns sanitized value
+sanitize_config_value() {
+    local value="$1"
+    # Remove command injection characters
+    value="${value//\$/}"
+    value="${value//\`/}"
+    value="${value//;/}"
+    value="${value//|/}"
+    value="${value//&/}"
+    # Remove newlines and carriage returns
+    value="${value//$'\n'/}"
+    value="${value//$'\r'/}"
+    # Trim whitespace
+    trim "$value"
+}
+
+# Validate file path (prevent path traversal)
+# Returns 0 if safe, 1 if dangerous
+validate_file_path() {
+    local path="$1"
+
+    # Reject empty paths
+    if [[ -z "$path" ]]; then
+        return 1
+    fi
+
+    # Reject paths starting with dash (option injection)
+    if [[ "$path" == -* ]]; then
+        return 1
+    fi
+
+    # Reject path traversal attempts
+    if [[ "$path" == *"/../"* || "$path" == "../"* || "$path" == *"/.." ]]; then
+        return 1
+    fi
+
+    # Accept absolute paths
+    if [[ "$path" == /* ]]; then
+        return 0
+    fi
+
+    # Accept relative paths starting with ./
+    if [[ "$path" == ./* ]]; then
+        return 0
+    fi
+
+    # Accept simple filenames (no directory separators)
+    if [[ "$path" != */* ]]; then
+        return 0
+    fi
+
+    # Reject other patterns
+    return 1
+}
+
+# Validate category name (alphanumeric and underscore only)
+# Returns 0 if valid, 1 otherwise
+validate_category_name() {
+    local category="$1"
+    [[ "$category" =~ ^[a-z][a-z0-9_]*$ ]]
+}
+
+# Validate output format
+# Returns 0 if valid, 1 otherwise
+validate_output_format() {
+    local format="$1"
+    case "$format" in
+        text|json|csv) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Log validation error
+log_validation_error() {
+    local param="$1"
+    local value="$2"
+    local reason="${3:-invalid value}"
+    log_warning "Validation failed for '$param': $reason (got: '$value')"
 }
