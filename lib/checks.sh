@@ -4,27 +4,54 @@
 # Implements individual security checks against defined benchmarks
 #
 
+# Get SSH parameter type for validation
+get_ssh_param_type() {
+    local param="$1"
+    case "$param" in
+        PermitRootLogin|PasswordAuthentication|PermitEmptyPasswords|X11Forwarding|\
+        AllowAgentForwarding|AllowTcpForwarding|PermitUserEnvironment|StrictModes|\
+        IgnoreRhosts|HostbasedAuthentication)
+            echo "boolean"
+            ;;
+        MaxAuthTries|ClientAliveInterval|ClientAliveCountMax|Protocol|LoginGraceTime|MaxSessions)
+            echo "numeric"
+            ;;
+        Ciphers|MACs|KexAlgorithms)
+            echo "crypto"
+            ;;
+        *)
+            echo "string"
+            ;;
+    esac
+}
+
 # Check SSH configuration settings
 check_ssh_config() {
     local pass_count=0
     local fail_count=0
     local skip_count=0
-    
+    local invalid_count=0
+
     print_subheader "SSH Configuration Checks"
     echo ""
-    
+
     if [[ ! -f "$SSH_CONFIG" ]]; then
         log_warning "SSH config file not found: $SSH_CONFIG"
         return $EXIT_SKIP
     fi
-    
+
     for key in "${!SSH_BENCHMARKS[@]}"; do
         local expected="${SSH_BENCHMARKS[$key]}"
         local severity="${SSH_SEVERITY[$key]}"
         local current
-        
+        local param_type
+
+        param_type=$(get_ssh_param_type "$key")
         current=$(get_config_value "$SSH_CONFIG" "$key" " ")
-        
+
+        # Sanitize the current value
+        current=$(sanitize_config_value "$current")
+
         if [[ -z "$current" ]]; then
             # Key not present - check if it's a critical setting
             if [[ "$severity" == "$SEVERITY_CRITICAL" || "$severity" == "$SEVERITY_HIGH" ]]; then
@@ -34,6 +61,11 @@ check_ssh_config() {
                 print_check_result "SSH $key" "warn" "Not configured"
                 ((skip_count++))
             fi
+        elif ! validate_config_value "$key" "$current" "$param_type"; then
+            # Invalid value format
+            print_check_result "SSH $key" "fail" "Invalid format: '$current'"
+            ((fail_count++))
+            ((invalid_count++))
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "SSH $key" "pass"
             ((pass_count++))
@@ -42,10 +74,14 @@ check_ssh_config() {
             ((fail_count++))
         fi
     done
-    
+
     echo ""
-    log_info "SSH checks: $pass_count passed, $fail_count failed, $skip_count skipped"
-    
+    if [[ $invalid_count -gt 0 ]]; then
+        log_warning "SSH checks: $pass_count passed, $fail_count failed, $skip_count skipped, $invalid_count invalid format"
+    else
+        log_info "SSH checks: $pass_count passed, $fail_count failed, $skip_count skipped"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     elif [[ $skip_count -gt 0 ]]; then
@@ -59,17 +95,21 @@ check_kernel_params() {
     local pass_count=0
     local fail_count=0
     local skip_count=0
-    
+    local invalid_count=0
+
     print_subheader "Kernel Parameter Checks"
     echo ""
-    
+
     for param in "${!KERNEL_BENCHMARKS[@]}"; do
         local expected="${KERNEL_BENCHMARKS[$param]}"
         local severity="${KERNEL_SEVERITY[$param]}"
         local current
-        
+
         current=$(get_sysctl "$param" 2>/dev/null)
-        
+
+        # Sanitize the current value
+        current=$(sanitize_config_value "$current")
+
         if [[ -z "$current" ]]; then
             # Parameter not available - might be kernel/distro specific
             if [[ "$severity" == "$SEVERITY_CRITICAL" ]]; then
@@ -79,6 +119,11 @@ check_kernel_params() {
                 print_check_result "Kernel $param" "skip" "Parameter not available"
                 ((skip_count++))
             fi
+        elif ! validate_kernel_numeric "$current"; then
+            # Invalid value format for kernel parameter
+            print_check_result "Kernel $param" "fail" "Invalid format: '$current'"
+            ((fail_count++))
+            ((invalid_count++))
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "Kernel $param" "pass"
             ((pass_count++))
@@ -87,10 +132,14 @@ check_kernel_params() {
             ((fail_count++))
         fi
     done
-    
+
     echo ""
-    log_info "Kernel checks: $pass_count passed, $fail_count failed, $skip_count skipped"
-    
+    if [[ $invalid_count -gt 0 ]]; then
+        log_warning "Kernel checks: $pass_count passed, $fail_count failed, $skip_count skipped, $invalid_count invalid format"
+    else
+        log_info "Kernel checks: $pass_count passed, $fail_count failed, $skip_count skipped"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     elif [[ $skip_count -gt 0 ]]; then
@@ -104,26 +153,40 @@ check_file_permissions() {
     local pass_count=0
     local fail_count=0
     local skip_count=0
-    
+    local invalid_count=0
+
     print_subheader "File Permission Checks"
     echo ""
-    
+
     for file in "${!FILE_PERM_BENCHMARKS[@]}"; do
         local expected="${FILE_PERM_BENCHMARKS[$file]}"
         local severity="${FILE_PERM_SEVERITY[$file]}"
         local current
-        
+
         if [[ ! -e "$file" ]]; then
             print_check_result "File $file" "skip" "File does not exist"
             ((skip_count++))
             continue
         fi
-        
+
+        # Validate file path before reading
+        if ! validate_file_path "$file"; then
+            print_check_result "File $file" "fail" "Invalid path format"
+            ((fail_count++))
+            ((invalid_count++))
+            continue
+        fi
+
         current=$(get_file_perms "$file")
-        
+
         if [[ -z "$current" ]]; then
             print_check_result "File $file" "skip" "Cannot read permissions"
             ((skip_count++))
+        elif ! validate_file_permission "$current"; then
+            # Invalid permission format
+            print_check_result "File $file" "fail" "Invalid format: '$current'"
+            ((fail_count++))
+            ((invalid_count++))
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "File $file" "pass"
             ((pass_count++))
@@ -132,10 +195,14 @@ check_file_permissions() {
             ((fail_count++))
         fi
     done
-    
+
     echo ""
-    log_info "Permission checks: $pass_count passed, $fail_count failed, $skip_count skipped"
-    
+    if [[ $invalid_count -gt 0 ]]; then
+        log_warning "Permission checks: $pass_count passed, $fail_count failed, $skip_count skipped, $invalid_count invalid format"
+    else
+        log_info "Permission checks: $pass_count passed, $fail_count failed, $skip_count skipped"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     elif [[ $skip_count -gt 0 ]]; then
@@ -202,24 +269,33 @@ check_uid_zero_users() {
 check_password_policy() {
     local pass_count=0
     local fail_count=0
-    
+    local invalid_count=0
+
     print_subheader "Password Policy Checks"
     echo ""
-    
+
     if [[ ! -f "$LOGIN_CONFIG" ]]; then
         log_warning "Login config not found: $LOGIN_CONFIG"
         return $EXIT_SKIP
     fi
-    
+
     for key in "${!PASSWORD_BENCHMARKS[@]}"; do
         local expected="${PASSWORD_BENCHMARKS[$key]}"
         local current
-        
+
         current=$(get_config_value "$LOGIN_CONFIG" "$key" " ")
-        
+
+        # Sanitize the current value
+        current=$(sanitize_config_value "$current")
+
         if [[ -z "$current" ]]; then
             print_check_result "Password $key" "warn" "Not configured (recommended: $expected)"
             ((pass_count++))
+        elif ! validate_password_numeric "$current"; then
+            # Invalid value format
+            print_check_result "Password $key" "fail" "Invalid format: '$current'"
+            ((fail_count++))
+            ((invalid_count++))
         elif [[ "$key" == "PASS_MAX_DAYS" || "$key" == "PASS_MIN_DAYS" || "$key" == "LOGIN_RETRIES" ]]; then
             # For these, lower or equal is better
             if [[ "$current" -le "$expected" ]]; then
@@ -239,10 +315,14 @@ check_password_policy() {
             fi
         fi
     done
-    
+
     echo ""
-    log_info "Password policy: $pass_count passed, $fail_count failed"
-    
+    if [[ $invalid_count -gt 0 ]]; then
+        log_warning "Password policy: $pass_count passed, $fail_count failed, $invalid_count invalid format"
+    else
+        log_info "Password policy: $pass_count passed, $fail_count failed"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
