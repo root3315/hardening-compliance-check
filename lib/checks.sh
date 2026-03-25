@@ -4,6 +4,49 @@
 # Implements individual security checks against defined benchmarks
 #
 
+# Global cache control
+USE_CACHE=false
+CACHE_HIT_COUNT=0
+CACHE_MISS_COUNT=0
+
+# Enable caching
+enable_cache() {
+    USE_CACHE=true
+}
+
+# Disable caching
+disable_cache() {
+    USE_CACHE=false
+}
+
+# Get cached check result or execute check
+# Args: check_name, check_function, [args...]
+# Returns: check result status
+run_check_with_cache() {
+    local check_name="$1"
+    local check_function="$2"
+    shift 2
+
+    if [[ "$USE_CACHE" == true ]] && is_cache_valid; then
+        local cached_result
+        cached_result=$(get_cached_result "$check_name")
+
+        if [[ -n "$cached_result" ]]; then
+            local cached_details
+            cached_details=$(get_cached_details "$check_name")
+            ((CACHE_HIT_COUNT++))
+            echo "$cached_result|$cached_details"
+            return 0
+        fi
+    fi
+
+    ((CACHE_MISS_COUNT++))
+    # Execute the check function and capture result
+    local result
+    result=$($check_function "$@")
+    echo "$result"
+}
+
 # Get SSH parameter type for validation
 get_ssh_param_type() {
     local param="$1"
@@ -215,9 +258,9 @@ check_file_permissions() {
 check_empty_passwords() {
     print_subheader "Empty Password Check"
     echo ""
-    
+
     local empty_pass_users=0
-    
+
     if [[ -f /etc/shadow ]]; then
         while IFS=: read -r username password rest; do
             if [[ "$password" == "" || "$password" == "!" || "$password" == "*" ]]; then
@@ -229,7 +272,7 @@ check_empty_passwords() {
             fi
         done < /etc/shadow
     fi
-    
+
     if [[ $empty_pass_users -eq 0 ]]; then
         print_check_result "No empty passwords" "pass"
         echo ""
@@ -245,15 +288,15 @@ check_empty_passwords() {
 check_uid_zero_users() {
     print_subheader "UID 0 User Check"
     echo ""
-    
+
     local uid_zero_users=()
-    
+
     while IFS=: read -r username _ uid rest; do
         if [[ "$uid" == "0" && "$username" != "root" ]]; then
             uid_zero_users+=("$username")
         fi
     done < /etc/passwd
-    
+
     if [[ ${#uid_zero_users[@]} -eq 0 ]]; then
         print_check_result "No non-root UID 0 users" "pass"
         echo ""
@@ -334,10 +377,10 @@ check_dangerous_services() {
     local pass_count=0
     local fail_count=0
     local skip_count=0
-    
+
     print_subheader "Dangerous Service Checks"
     echo ""
-    
+
     for service in "${DISABLED_SERVICES[@]}"; do
         if service_enabled "$service" || service_active "$service"; then
             print_check_result "Service $service disabled" "fail" "Service is active/enabled"
@@ -347,10 +390,10 @@ check_dangerous_services() {
             ((pass_count++))
         fi
     done
-    
+
     echo ""
     log_info "Service checks: $pass_count passed, $fail_count failed"
-    
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -361,10 +404,10 @@ check_dangerous_services() {
 check_required_services() {
     local pass_count=0
     local fail_count=0
-    
+
     print_subheader "Required Service Checks"
     echo ""
-    
+
     for service in "${ENABLED_SERVICES[@]}"; do
         if command_exists systemctl; then
             if service_enabled "$service" || service_active "$service"; then
@@ -378,10 +421,10 @@ check_required_services() {
             print_check_result "Service $service" "skip" "systemctl not available"
         fi
     done
-    
+
     echo ""
     log_info "Required services: $pass_count passed, $fail_count warnings"
-    
+
     return $EXIT_SUCCESS
 }
 
@@ -389,10 +432,10 @@ check_required_services() {
 check_cron_at_restrictions() {
     local pass_count=0
     local fail_count=0
-    
+
     print_subheader "Cron/At Access Control Checks"
     echo ""
-    
+
     # Check cron.allow exists or cron.deny doesn't exist
     if [[ -f "$CRON_ALLOW" ]]; then
         print_check_result "Cron access restricted" "pass" "cron.allow exists"
@@ -404,7 +447,7 @@ check_cron_at_restrictions() {
         print_check_result "Cron access restricted" "fail" "No cron.allow file"
         ((fail_count++))
     fi
-    
+
     # Check at.allow exists or at.deny doesn't exist
     if [[ -f "$AT_ALLOW" ]]; then
         print_check_result "At access restricted" "pass" "at.allow exists"
@@ -416,10 +459,10 @@ check_cron_at_restrictions() {
         print_check_result "At access restricted" "fail" "No at.allow file"
         ((fail_count++))
     fi
-    
+
     echo ""
     log_info "Access control: $pass_count passed, $fail_count failed"
-    
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -431,12 +474,12 @@ check_world_writable() {
     local pass_count=0
     local fail_count=0
     local world_writable_files=()
-    
+
     print_subheader "World-Writable File Checks"
     echo ""
-    
+
     local system_dirs=("/etc" "/usr" "/bin" "/sbin" "/lib" "/boot")
-    
+
     for dir in "${system_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             while IFS= read -r -d '' file; do
@@ -444,7 +487,7 @@ check_world_writable() {
             done < <(find "$dir" -type f -perm -0002 -print0 2>/dev/null | head -z -n 20)
         fi
     done
-    
+
     if [[ ${#world_writable_files[@]} -eq 0 ]]; then
         print_check_result "No world-writable system files" "pass"
         ((pass_count++))
@@ -458,10 +501,10 @@ check_world_writable() {
             echo "    ... and $((${#world_writable_files[@]} - 5)) more"
         fi
     fi
-    
+
     echo ""
     log_info "World-writable check: $pass_count passed, $fail_count failed"
-    
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -473,12 +516,12 @@ check_unowned_files() {
     local pass_count=0
     local fail_count=0
     local unowned_files=()
-    
+
     print_subheader "Unowned File Checks"
     echo ""
-    
+
     local check_dirs=("/etc" "/usr" "/bin" "/sbin")
-    
+
     for dir in "${check_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             while IFS= read -r -d '' file; do
@@ -486,7 +529,7 @@ check_unowned_files() {
             done < <(find "$dir" -type f \( -nouser -o -nogroup \) -print0 2>/dev/null | head -z -n 20)
         fi
     done
-    
+
     if [[ ${#unowned_files[@]} -eq 0 ]]; then
         print_check_result "No unowned system files" "pass"
         ((pass_count++))
@@ -500,10 +543,10 @@ check_unowned_files() {
             echo "    ... and $((${#unowned_files[@]} - 5)) more"
         fi
     fi
-    
+
     echo ""
     log_info "Unowned file check: $pass_count passed, $fail_count failed"
-    
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -514,11 +557,11 @@ check_unowned_files() {
 check_audit_status() {
     print_subheader "Audit Daemon Check"
     echo ""
-    
+
     if command_exists auditctl; then
         local status
         status=$(auditctl -s 2>/dev/null)
-        
+
         if [[ -n "$status" ]]; then
             print_check_result "Audit daemon running" "pass"
             echo ""
@@ -540,12 +583,12 @@ check_suid_sgid() {
     local pass_count=0
     local fail_count=0
     local suid_files=()
-    
+
     print_subheader "SUID/SGID Binary Checks"
     echo ""
-    
+
     local non_standard_dirs=("/tmp" "/var/tmp" "/home" "/opt")
-    
+
     for dir in "${non_standard_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             while IFS= read -r -d '' file; do
@@ -553,7 +596,7 @@ check_suid_sgid() {
             done < <(find "$dir" -type f \( -perm -4000 -o -perm -2000 \) -print0 2>/dev/null | head -z -n 20)
         fi
     done
-    
+
     if [[ ${#suid_files[@]} -eq 0 ]]; then
         print_check_result "No SUID/SGID in non-standard dirs" "pass"
         ((pass_count++))
@@ -567,10 +610,10 @@ check_suid_sgid() {
             echo "    ... and $((${#suid_files[@]} - 5)) more"
         fi
     fi
-    
+
     echo ""
     log_info "SUID/SGID check: $pass_count passed, $fail_count warnings"
-    
+
     return $EXIT_SUCCESS
 }
 
@@ -580,14 +623,19 @@ run_all_checks() {
     local total_fail=0
     local total_skip=0
     local result
-    
+
+    # Initialize cache if enabled
+    if [[ "$USE_CACHE" == true ]]; then
+        write_cache_header
+    fi
+
     print_header "LINUX HARDENING COMPLIANCE CHECK"
     echo "  Started: $(timestamp)"
     echo "  Hostname: $(hostname)"
     echo "  Distribution: $(get_distribution) $(get_distribution_version)"
     echo "  Kernel: $(uname -r)"
     echo ""
-    
+
     # File permissions
     print_header "FILE PERMISSIONS"
     check_file_permissions
@@ -597,7 +645,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # User accounts
     print_header "USER ACCOUNT SECURITY"
     check_empty_passwords
@@ -607,7 +655,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_uid_zero_users
     result=$?
     case $result in
@@ -615,7 +663,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_password_policy
     result=$?
     case $result in
@@ -623,7 +671,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # SSH hardening
     print_header "SSH HARDENING"
     check_ssh_config
@@ -633,7 +681,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # Kernel hardening
     print_header "KERNEL HARDENING"
     check_kernel_params
@@ -643,7 +691,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # Service hardening
     print_header "SERVICE HARDENING"
     check_dangerous_services
@@ -653,7 +701,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_required_services
     result=$?
     case $result in
@@ -661,7 +709,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_cron_at_restrictions
     result=$?
     case $result in
@@ -669,7 +717,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # Additional security checks
     print_header "ADDITIONAL SECURITY CHECKS"
     check_world_writable
@@ -679,7 +727,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_unowned_files
     result=$?
     case $result in
@@ -687,7 +735,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_suid_sgid
     result=$?
     case $result in
@@ -695,7 +743,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     check_audit_status
     result=$?
     case $result in
@@ -703,7 +751,7 @@ run_all_checks() {
         1) ((total_fail++)) ;;
         *) ((total_skip++)) ;;
     esac
-    
+
     # Summary
     print_header "COMPLIANCE SUMMARY"
     local total=$((total_pass + total_fail + total_skip))
@@ -711,7 +759,7 @@ run_all_checks() {
     if [[ $total -gt 0 ]]; then
         pass_pct=$(( (total_pass * 100) / total ))
     fi
-    
+
     echo "  Total checks:  $total"
     print_color "$COLOR_GREEN" "  Passed:        $total_pass"
     print_color "$COLOR_RED" "  Failed:        $total_fail"
@@ -719,7 +767,16 @@ run_all_checks() {
     echo ""
     echo "  Compliance score: ${pass_pct}%"
     echo ""
-    
+
+    # Report cache statistics if caching was used
+    if [[ "$USE_CACHE" == true ]]; then
+        if [[ $CACHE_HIT_COUNT -gt 0 || $CACHE_MISS_COUNT -gt 0 ]]; then
+            echo "  Cache hits:    $CACHE_HIT_COUNT"
+            echo "  Cache misses:  $CACHE_MISS_COUNT"
+            echo ""
+        fi
+    fi
+
     if [[ $total_fail -eq 0 ]]; then
         print_color "$COLOR_GREEN" "  Status: COMPLIANT"
         return $EXIT_SUCCESS

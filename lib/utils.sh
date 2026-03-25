@@ -69,7 +69,7 @@ print_check_result() {
     local check_name="$1"
     local status="$2"
     local details="${3:-}"
-    
+
     local status_color status_icon
     case "$status" in
         pass)
@@ -93,13 +93,13 @@ print_check_result() {
             status_icon="?"
             ;;
     esac
-    
+
     if supports_color; then
         printf "  ${status_color}[%s]${COLOR_RESET} %-50s" "$status_icon" "$check_name"
     else
         printf "  [%s] %-50s" "$status_icon" "$check_name"
     fi
-    
+
     if [[ -n "$details" ]]; then
         echo " - $details"
     else
@@ -113,11 +113,11 @@ print_header() {
     local width=60
     local padding=$(( (width - ${#title}) / 2 ))
     local line=""
-    
+
     for ((i=0; i<width; i++)); do
         line+="="
     done
-    
+
     echo ""
     if supports_color; then
         echo -e "${COLOR_BOLD}${COLOR_CYAN}${line}${COLOR_RESET}"
@@ -230,7 +230,7 @@ check_sysctl() {
     local expected="$2"
     local current
     current=$(get_sysctl "$param")
-    
+
     if [[ "$current" == "$expected" ]]; then
         return 0
     fi
@@ -242,7 +242,7 @@ get_config_value() {
     local file="$1"
     local key="$2"
     local separator="${3:- }"
-    
+
     if [[ -f "$file" ]]; then
         grep -E "^[[:space:]]*${key}${separator}" "$file" 2>/dev/null | \
             sed -E "s/^[[:space:]]*${key}${separator}//" | \
@@ -256,11 +256,11 @@ config_has_value() {
     local key="$2"
     local value="$3"
     local separator="${4:- }"
-    
+
     if [[ ! -f "$file" ]]; then
         return 1
     fi
-    
+
     local current
     current=$(get_config_value "$file" "$key" "$separator")
     [[ "$current" == "$value" ]]
@@ -270,11 +270,11 @@ config_has_value() {
 config_key_exists() {
     local file="$1"
     local key="$2"
-    
+
     if [[ ! -f "$file" ]]; then
         return 1
     fi
-    
+
     grep -qE "^[[:space:]]*${key}[[:space:]]" "$file" 2>/dev/null
 }
 
@@ -316,6 +316,11 @@ ends_with() {
 # Get current timestamp
 timestamp() {
     date '+%Y-%m-%d %H:%M:%S'
+}
+
+# Get current timestamp in seconds since epoch
+timestamp_epoch() {
+    date '+%s'
 }
 
 # Get distribution info
@@ -541,4 +546,201 @@ log_validation_error() {
     local value="$2"
     local reason="${3:-invalid value}"
     log_warning "Validation failed for '$param': $reason (got: '$value')"
+}
+
+# ============================================================================
+# Cache Functions
+# ============================================================================
+
+# Initialize cache directory
+# Returns 0 on success, 1 on failure
+init_cache() {
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        mkdir -p "$CACHE_DIR" 2>/dev/null
+        if [[ $? -ne 0 ]]; then
+            log_warning "Failed to create cache directory: $CACHE_DIR"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Check if cache is enabled and valid
+# Returns 0 if cache should be used, 1 otherwise
+is_cache_valid() {
+    local cache_ttl="${1:-$DEFAULT_CACHE_TTL}"
+
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        return 1
+    fi
+
+    local cache_age
+    local current_time
+    current_time=$(timestamp_epoch)
+    cache_age=$(get_cache_age)
+
+    if [[ -z "$cache_age" ]]; then
+        return 1
+    fi
+
+    local age=$((current_time - cache_age))
+    if [[ $age -lt $cache_ttl ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Get cache age in seconds since epoch
+# Returns empty string if cache doesn't exist or is invalid
+get_cache_age() {
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        echo ""
+        return
+    fi
+
+    local meta_line
+    meta_line=$(grep "^#CACHE_META:" "$CACHE_FILE" 2>/dev/null | head -1)
+    if [[ -z "$meta_line" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "$meta_line" | sed 's/^#CACHE_META://' | cut -d'|' -f1
+}
+
+# Get cache version
+get_cache_version() {
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        echo ""
+        return
+    fi
+
+    local meta_line
+    meta_line=$(grep "^#CACHE_META:" "$CACHE_FILE" 2>/dev/null | head -1)
+    if [[ -z "$meta_line" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "$meta_line" | sed 's/^#CACHE_META://' | cut -d'|' -f2
+}
+
+# Get cached result for a specific check
+# Args: check_name
+# Returns: cached result (pass|fail|skip|warn) or empty if not found
+get_cached_result() {
+    local check_name="$1"
+
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        echo ""
+        return
+    fi
+
+    local result_line
+    result_line=$(grep "^${check_name}|" "$CACHE_FILE" 2>/dev/null | head -1)
+    if [[ -z "$result_line" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "$result_line" | cut -d'|' -f2
+}
+
+# Get cached details for a specific check
+# Args: check_name
+# Returns: cached details or empty if not found
+get_cached_details() {
+    local check_name="$1"
+
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        echo ""
+        return
+    fi
+
+    local result_line
+    result_line=$(grep "^${check_name}|" "$CACHE_FILE" 2>/dev/null | head -1)
+    if [[ -z "$result_line" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "$result_line" | cut -d'|' -f3-
+}
+
+# Store result in cache
+# Args: check_name, status, details
+store_cache_result() {
+    local check_name="$1"
+    local status="$2"
+    local details="${3:-}"
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        init_cache || return 1
+    fi
+
+    # Remove old entry for this check if exists
+    if [[ -f "$CACHE_FILE" ]]; then
+        local temp_file="${CACHE_FILE}.tmp"
+        grep -v "^${check_name}|" "$CACHE_FILE" > "$temp_file" 2>/dev/null || true
+        mv "$temp_file" "$CACHE_FILE" 2>/dev/null || true
+    fi
+
+    # Append new entry
+    echo "${check_name}|${status}|${details}" >> "$CACHE_FILE" 2>/dev/null
+}
+
+# Write cache metadata header
+# Should be called before storing results
+write_cache_header() {
+    local current_time
+    current_time=$(timestamp_epoch)
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        init_cache || return 1
+    fi
+
+    # Create new cache file with header
+    echo "#CACHE_META:${current_time}|${CACHE_VERSION}" > "$CACHE_FILE" 2>/dev/null
+    echo "# Generated: $(timestamp)" >> "$CACHE_FILE" 2>/dev/null
+    echo "# Hostname: $(hostname)" >> "$CACHE_FILE" 2>/dev/null
+    echo "# Distribution: $(get_distribution) $(get_distribution_version)" >> "$CACHE_FILE" 2>/dev/null
+    echo "# Kernel: $(uname -r)" >> "$CACHE_FILE" 2>/dev/null
+    echo "" >> "$CACHE_FILE" 2>/dev/null
+}
+
+# Clear the cache
+clear_cache() {
+    if [[ -f "$CACHE_FILE" ]]; then
+        rm -f "$CACHE_FILE" 2>/dev/null
+        if [[ $? -eq 0 ]]; then
+            log_info "Cache cleared"
+            return 0
+        else
+            log_error "Failed to clear cache"
+            return 1
+        fi
+    else
+        log_info "No cache to clear"
+        return 0
+    fi
+}
+
+# Get cache file path
+get_cache_path() {
+    echo "$CACHE_FILE"
+}
+
+# Check if cache is empty (only has header)
+is_cache_empty() {
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        return 0
+    fi
+
+    local data_lines
+    data_lines=$(grep -v "^#" "$CACHE_FILE" 2>/dev/null | grep -v "^$" | wc -l)
+    if [[ $data_lines -eq 0 ]]; then
+        return 0
+    fi
+    return 1
 }

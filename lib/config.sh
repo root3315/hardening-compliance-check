@@ -19,6 +19,12 @@ readonly CRON_DENY="/etc/cron.deny"
 readonly AT_ALLOW="/etc/at.allow"
 readonly AT_DENY="/etc/at.deny"
 
+# Cache configuration
+readonly CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hardening-compliance-check"
+readonly CACHE_FILE="${CACHE_DIR}/check_results.cache"
+readonly CACHE_VERSION="1"
+DEFAULT_CACHE_TTL=3600  # 1 hour in seconds
+
 # Benchmark severity levels
 readonly SEVERITY_CRITICAL="critical"
 readonly SEVERITY_HIGH="high"

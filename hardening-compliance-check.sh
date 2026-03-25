@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # hardening-compliance-check.sh - Linux Hardening Compliance Checker
-# 
+#
 # A comprehensive security compliance checker that validates Linux systems
 # against industry-standard hardening benchmarks including CIS benchmarks.
 #
@@ -17,6 +17,10 @@
 #   --no-color          Disable colored output
 #   --list-categories   List available check categories
 #   --list-checks       List all available checks
+#   --cache             Enable caching of check results
+#   --no-cache          Disable caching (default)
+#   --clear-cache       Clear the cache and exit
+#   --cache-ttl SECS    Set cache time-to-live in seconds (default: 3600)
 #
 
 set -euo pipefail
@@ -36,6 +40,7 @@ QUIET_MODE=false
 NO_COLOR=false
 SELECTED_CATEGORY=""
 START_TIME=""
+CACHE_TTL="$DEFAULT_CACHE_TTL"
 
 # Print usage information
 usage() {
@@ -57,7 +62,11 @@ OPTIONS:
     -q, --quiet         Suppress non-essential output
     --no-color          Disable colored output
     --list-categories   List available check categories
-    --list-checks       List all available checks with descriptions
+    --list-checks       List all available checks
+    --cache             Enable caching of check results
+    --no-cache          Disable caching (default)
+    --clear-cache       Clear the cache and exit
+    --cache-ttl SECS    Set cache time-to-live in seconds (default: 3600)
 
 EXAMPLES:
     # Run all checks
@@ -69,8 +78,14 @@ EXAMPLES:
     # Output results to JSON file
     ${SCRIPT_NAME} -f json -o results.json
 
-    # Run with quiet mode
-    ${SCRIPT_NAME} -q
+    # Run with caching enabled (faster repeated runs)
+    ${SCRIPT_NAME} --cache
+
+    # Clear the cache
+    ${SCRIPT_NAME} --clear-cache
+
+    # Run with custom cache TTL (5 minutes)
+    ${SCRIPT_NAME} --cache --cache-ttl 300
 
 EXIT CODES:
     0   All checks passed (compliant)
@@ -82,6 +97,7 @@ NOTES:
     - This script should be run as root for complete system access
     - Some checks may be distribution-specific
     - Results are based on CIS Benchmark recommendations
+    - Cache is stored in: ${CACHE_DIR}
 
 EOF
 }
@@ -98,26 +114,26 @@ print_version() {
 # List available categories
 list_categories() {
     print_header "AVAILABLE CHECK CATEGORIES"
-    
+
     for key in "${!CATEGORIES[@]}"; do
         local name="${CATEGORIES[$key]}"
         printf "  %-25s %s\n" "$key" "- $name"
     done
-    
+
     echo ""
 }
 
 # List all available checks
 list_checks() {
     print_header "AVAILABLE SECURITY CHECKS"
-    
+
     echo "SSH Configuration Checks:"
     for key in "${!SSH_BENCHMARKS[@]}"; do
         local expected="${SSH_BENCHMARKS[$key]}"
         local severity="${SSH_SEVERITY[$key]}"
         printf "  %-30s (expected: %-15s severity: %s)\n" "$key" "$expected" "$severity"
     done
-    
+
     echo ""
     echo "Kernel Parameter Checks:"
     for param in "${!KERNEL_BENCHMARKS[@]}"; do
@@ -125,7 +141,7 @@ list_checks() {
         local severity="${KERNEL_SEVERITY[$param]}"
         printf "  %-40s = %-5s [%s]\n" "$param" "$expected" "$severity"
     done
-    
+
     echo ""
     echo "File Permission Checks:"
     for file in "${!FILE_PERM_BENCHMARKS[@]}"; do
@@ -133,26 +149,26 @@ list_checks() {
         local severity="${FILE_PERM_SEVERITY[$file]}"
         printf "  %-35s %s [%s]\n" "$file" "$expected" "$severity"
     done
-    
+
     echo ""
     echo "Password Policy Checks:"
     for key in "${!PASSWORD_BENCHMARKS[@]}"; do
         local expected="${PASSWORD_BENCHMARKS[$key]}"
         printf "  %-20s %s\n" "$key" "$expected"
     done
-    
+
     echo ""
     echo "Disabled Services:"
     for service in "${DISABLED_SERVICES[@]}"; do
         printf "  %s\n" "$service"
     done
-    
+
     echo ""
     echo "Enabled Services:"
     for service in "${ENABLED_SERVICES[@]}"; do
         printf "  %s\n" "$service"
     done
-    
+
     echo ""
 }
 
@@ -211,6 +227,32 @@ parse_args() {
                 list_checks
                 exit $EXIT_SUCCESS
                 ;;
+            --cache)
+                USE_CACHE=true
+                shift
+                ;;
+            --no-cache)
+                USE_CACHE=false
+                shift
+                ;;
+            --clear-cache)
+                clear_cache
+                exit $EXIT_SUCCESS
+                ;;
+            --cache-ttl)
+                if [[ -n "${2:-}" ]]; then
+                    if [[ "$2" =~ ^[0-9]+$ ]]; then
+                        CACHE_TTL="$2"
+                        shift 2
+                    else
+                        log_error "Cache TTL must be a positive integer"
+                        exit $EXIT_FAILURE
+                    fi
+                else
+                    log_error "Cache TTL argument requires a value"
+                    exit $EXIT_FAILURE
+                fi
+                ;;
             *)
                 log_error "Unknown option: $1"
                 usage
@@ -255,10 +297,10 @@ generate_json_output() {
     local fail_count="$2"
     local skip_count="$3"
     local total="$4"
-    
+
     local timestamp
     timestamp=$(date -Iseconds)
-    
+
     cat << EOF
 {
     "report": {
@@ -286,7 +328,7 @@ generate_csv_output() {
     local pass_count="$1"
     local fail_count="$2"
     local skip_count="$3"
-    
+
     echo "metric,value"
     echo "timestamp,$(date -Iseconds)"
     echo "hostname,$(hostname)"
@@ -303,7 +345,7 @@ generate_csv_output() {
 run_category_checks() {
     local category="$1"
     local result
-    
+
     case "$category" in
         file_permissions)
             check_file_permissions
@@ -338,60 +380,60 @@ run_category_checks() {
             return $EXIT_FAILURE
             ;;
     esac
-    
+
     return $result
 }
 
 # Main function
 main() {
     START_TIME=$(date +%s)
-    
+
     # Parse command line arguments
     parse_args "$@"
-    
+
     # Handle no-color option
     if [[ "$NO_COLOR" == true ]]; then
         exec 3>&1
         exec > >(sed 's/\x1b\[[0-9;]*m//g')
     fi
-    
+
     # Validate inputs
     if ! validate_format; then
         exit $EXIT_FAILURE
     fi
-    
+
     if ! validate_category; then
         exit $EXIT_FAILURE
     fi
-    
+
     # Check if running as root (warn but don't fail)
     if [[ $EUID -ne 0 ]]; then
         log_warning "Running as non-root user. Some checks may be skipped."
         log_warning "For complete results, run as root."
         echo ""
     fi
-    
+
     # Run checks
     local exit_code
-    
+
     if [[ -n "$SELECTED_CATEGORY" ]]; then
         print_header "LINUX HARDENING COMPLIANCE CHECK"
         echo "  Category: ${CATEGORIES[$SELECTED_CATEGORY]}"
         echo "  Started: $(timestamp)"
         echo ""
-        
+
         run_category_checks "$SELECTED_CATEGORY"
         exit_code=$?
     else
         run_all_checks
         exit_code=$?
     fi
-    
+
     # Calculate duration
     local end_time duration
     end_time=$(date +%s)
     duration=$((end_time - START_TIME))
-    
+
     # Generate output file if specified
     if [[ -n "$OUTPUT_FILE" ]]; then
         case "$OUTPUT_FORMAT" in
@@ -407,11 +449,11 @@ main() {
                 ;;
         esac
     fi
-    
+
     # Print completion message
     echo ""
     log_info "Completed in $(format_duration $duration)"
-    
+
     exit $exit_code
 }
 
