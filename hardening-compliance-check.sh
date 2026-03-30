@@ -41,6 +41,7 @@ NO_COLOR=false
 SELECTED_CATEGORY=""
 START_TIME=""
 CACHE_TTL="$DEFAULT_CACHE_TTL"
+USE_CACHE=false
 
 # Print usage information
 usage() {
@@ -345,6 +346,12 @@ generate_csv_output() {
 run_category_checks() {
     local category="$1"
     local result
+
+    # Initialize cache if enabled
+    if [[ "$USE_CACHE" == "true" ]]; then
+        init_cache
+        write_cache_header
+    fi
 
     case "$category" in
         file_permissions)
