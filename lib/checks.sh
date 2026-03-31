@@ -19,34 +19,6 @@ disable_cache() {
     USE_CACHE=false
 }
 
-# Get cached check result or execute check
-# Args: check_name, check_function, [args...]
-# Returns: check result status
-run_check_with_cache() {
-    local check_name="$1"
-    local check_function="$2"
-    shift 2
-
-    if [[ "$USE_CACHE" == true ]] && is_cache_valid; then
-        local cached_result
-        cached_result=$(get_cached_result "$check_name")
-
-        if [[ -n "$cached_result" ]]; then
-            local cached_details
-            cached_details=$(get_cached_details "$check_name")
-            ((CACHE_HIT_COUNT++))
-            echo "$cached_result|$cached_details"
-            return 0
-        fi
-    fi
-
-    ((CACHE_MISS_COUNT++))
-    # Execute the check function and capture result
-    local result
-    result=$($check_function "$@")
-    echo "$result"
-}
-
 # Get SSH parameter type for validation
 get_ssh_param_type() {
     local param="$1"
@@ -80,6 +52,7 @@ check_ssh_config() {
 
     if [[ ! -f "$SSH_CONFIG" ]]; then
         log_warning "SSH config file not found: $SSH_CONFIG"
+        store_cache_result "ssh_config" "skip" "Config not found"
         return $EXIT_SKIP
     fi
 
@@ -123,6 +96,15 @@ check_ssh_config() {
         log_warning "SSH checks: $pass_count passed, $fail_count failed, $skip_count skipped, $invalid_count invalid format"
     else
         log_info "SSH checks: $pass_count passed, $fail_count failed, $skip_count skipped"
+    fi
+
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "ssh_config" "fail" "Failed: $fail_count"
+    elif [[ $skip_count -gt 0 ]]; then
+        store_cache_result "ssh_config" "skip" "Skipped: $skip_count"
+    else
+        store_cache_result "ssh_config" "pass" "Passed: $pass_count"
     fi
 
     if [[ $fail_count -gt 0 ]]; then
@@ -181,6 +163,15 @@ check_kernel_params() {
         log_warning "Kernel checks: $pass_count passed, $fail_count failed, $skip_count skipped, $invalid_count invalid format"
     else
         log_info "Kernel checks: $pass_count passed, $fail_count failed, $skip_count skipped"
+    fi
+
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "kernel_params" "fail" "Failed: $fail_count"
+    elif [[ $skip_count -gt 0 ]]; then
+        store_cache_result "kernel_params" "skip" "Skipped: $skip_count"
+    else
+        store_cache_result "kernel_params" "pass" "Passed: $pass_count"
     fi
 
     if [[ $fail_count -gt 0 ]]; then
@@ -246,6 +237,15 @@ check_file_permissions() {
         log_info "Permission checks: $pass_count passed, $fail_count failed, $skip_count skipped"
     fi
 
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "file_permissions" "fail" "Failed: $fail_count"
+    elif [[ $skip_count -gt 0 ]]; then
+        store_cache_result "file_permissions" "skip" "Skipped: $skip_count"
+    else
+        store_cache_result "file_permissions" "pass" "Passed: $pass_count"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     elif [[ $skip_count -gt 0 ]]; then
@@ -276,10 +276,12 @@ check_empty_passwords() {
     if [[ $empty_pass_users -eq 0 ]]; then
         print_check_result "No empty passwords" "pass"
         echo ""
+        store_cache_result "empty_passwords" "pass" "No empty passwords found"
         return $EXIT_SUCCESS
     else
         print_check_result "Empty password users found" "fail" "Count: $empty_pass_users"
         echo ""
+        store_cache_result "empty_passwords" "fail" "Found: $empty_pass_users"
         return $EXIT_FAILURE
     fi
 }
@@ -300,10 +302,12 @@ check_uid_zero_users() {
     if [[ ${#uid_zero_users[@]} -eq 0 ]]; then
         print_check_result "No non-root UID 0 users" "pass"
         echo ""
+        store_cache_result "uid_zero_users" "pass" "No non-root UID 0 users"
         return $EXIT_SUCCESS
     else
         print_check_result "Non-root UID 0 users found" "fail" "Users: ${uid_zero_users[*]}"
         echo ""
+        store_cache_result "uid_zero_users" "fail" "Found: ${uid_zero_users[*]}"
         return $EXIT_FAILURE
     fi
 }
@@ -319,6 +323,7 @@ check_password_policy() {
 
     if [[ ! -f "$LOGIN_CONFIG" ]]; then
         log_warning "Login config not found: $LOGIN_CONFIG"
+        store_cache_result "password_policy" "skip" "Config not found"
         return $EXIT_SKIP
     fi
 
@@ -366,6 +371,13 @@ check_password_policy() {
         log_info "Password policy: $pass_count passed, $fail_count failed"
     fi
 
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "password_policy" "fail" "Failed: $fail_count"
+    else
+        store_cache_result "password_policy" "pass" "Passed: $pass_count"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -393,6 +405,13 @@ check_dangerous_services() {
 
     echo ""
     log_info "Service checks: $pass_count passed, $fail_count failed"
+
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "dangerous_services" "fail" "Failed: $fail_count"
+    else
+        store_cache_result "dangerous_services" "pass" "Passed: $pass_count"
+    fi
 
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
@@ -424,6 +443,13 @@ check_required_services() {
 
     echo ""
     log_info "Required services: $pass_count passed, $fail_count warnings"
+
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "required_services" "warn" "Warnings: $fail_count"
+    else
+        store_cache_result "required_services" "pass" "Passed: $pass_count"
+    fi
 
     return $EXIT_SUCCESS
 }
@@ -462,6 +488,13 @@ check_cron_at_restrictions() {
 
     echo ""
     log_info "Access control: $pass_count passed, $fail_count failed"
+
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "cron_at_restrictions" "fail" "Failed: $fail_count"
+    else
+        store_cache_result "cron_at_restrictions" "pass" "Passed: $pass_count"
+    fi
 
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
@@ -505,6 +538,13 @@ check_world_writable() {
     echo ""
     log_info "World-writable check: $pass_count passed, $fail_count failed"
 
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "world_writable" "fail" "Found: ${#world_writable_files[@]}"
+    else
+        store_cache_result "world_writable" "pass" "No world-writable files"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -547,6 +587,13 @@ check_unowned_files() {
     echo ""
     log_info "Unowned file check: $pass_count passed, $fail_count failed"
 
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "unowned_files" "fail" "Found: ${#unowned_files[@]}"
+    else
+        store_cache_result "unowned_files" "pass" "No unowned files"
+    fi
+
     if [[ $fail_count -gt 0 ]]; then
         return $EXIT_FAILURE
     fi
@@ -565,15 +612,18 @@ check_audit_status() {
         if [[ -n "$status" ]]; then
             print_check_result "Audit daemon running" "pass"
             echo ""
+            store_cache_result "audit_status" "pass" "Audit daemon running"
             return $EXIT_SUCCESS
         else
             print_check_result "Audit daemon running" "fail" "Not running"
             echo ""
+            store_cache_result "audit_status" "fail" "Audit daemon not running"
             return $EXIT_FAILURE
         fi
     else
         print_check_result "Audit daemon" "skip" "auditctl not installed"
         echo ""
+        store_cache_result "audit_status" "skip" "auditctl not installed"
         return $EXIT_SKIP
     fi
 }
@@ -614,6 +664,13 @@ check_suid_sgid() {
     echo ""
     log_info "SUID/SGID check: $pass_count passed, $fail_count warnings"
 
+    # Store cache result
+    if [[ $fail_count -gt 0 ]]; then
+        store_cache_result "suid_sgid" "warn" "Found: ${#suid_files[@]}"
+    else
+        store_cache_result "suid_sgid" "pass" "No SUID/SGID in non-standard locations"
+    fi
+
     return $EXIT_SUCCESS
 }
 
@@ -625,7 +682,8 @@ run_all_checks() {
     local result
 
     # Initialize cache if enabled
-    if [[ "$USE_CACHE" == true ]]; then
+    if [[ "$USE_CACHE" == "true" ]]; then
+        init_cache
         write_cache_header
     fi
 
@@ -769,7 +827,7 @@ run_all_checks() {
     echo ""
 
     # Report cache statistics if caching was used
-    if [[ "$USE_CACHE" == true ]]; then
+    if [[ "$USE_CACHE" == "true" ]]; then
         if [[ $CACHE_HIT_COUNT -gt 0 || $CACHE_MISS_COUNT -gt 0 ]]; then
             echo "  Cache hits:    $CACHE_HIT_COUNT"
             echo "  Cache misses:  $CACHE_MISS_COUNT"
