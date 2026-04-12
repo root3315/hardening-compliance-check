@@ -50,16 +50,16 @@ assert_equals() {
     local actual="$2"
     local message="${3:-}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if [[ "$expected" == "$actual" ]]; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "assert_equals: $message"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "assert_equals: $message"
         echo "  Expected: '$expected'"
         echo "  Actual:   '$actual'"
@@ -73,16 +73,16 @@ assert_not_equals() {
     local actual="$2"
     local message="${3:-}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if [[ "$expected" != "$actual" ]]; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "assert_not_equals: $message"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "assert_not_equals: $message"
         echo "  Expected not: '$expected'"
         echo "  Actual:       '$actual'"
@@ -95,16 +95,16 @@ assert_true() {
     local condition="$1"
     local message="${2:-}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if eval "$condition"; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "assert_true: $message"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "assert_true: $message"
         echo "  Condition: $condition"
         return 1
@@ -116,16 +116,16 @@ assert_false() {
     local condition="$1"
     local message="${2:-}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if ! eval "$condition"; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "assert_false: $message"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "assert_false: $message"
         echo "  Condition: $condition"
         return 1
@@ -137,16 +137,16 @@ assert_file_exists() {
     local file="$1"
     local message="${2:-File should exist}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if [[ -f "$file" ]]; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "$message: $file"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "$message: $file"
         return 1
     fi
@@ -157,16 +157,16 @@ assert_command_exists() {
     local cmd="$1"
     local message="${2:-Command should exist}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if command -v "$cmd" &>/dev/null; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "$message: $cmd"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "$message: $cmd"
         return 1
     fi
@@ -178,16 +178,16 @@ assert_exit_code() {
     local actual="$2"
     local message="${3:-}"
 
-    ((TESTS_RUN++))
+    ((TESTS_RUN++)) || true
 
     if [[ "$expected" == "$actual" ]]; then
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "assert_exit_code: $message"
         fi
         return 0
     else
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         log_error "assert_exit_code: $message"
         echo "  Expected: $expected"
         echo "  Actual:   $actual"
@@ -198,7 +198,7 @@ assert_exit_code() {
 # Skip a test
 skip_test() {
     local message="$1"
-    ((TESTS_SKIPPED++))
+    ((TESTS_SKIPPED++)) || true
     log_warning "SKIPPED: $message"
 }
 
@@ -337,50 +337,50 @@ test_script_structure() {
     # Test scripts are syntactically valid
     local syntax_check
     if bash -n "${PROJECT_DIR}/hardening-compliance-check.sh" 2>/dev/null; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "Main script syntax is valid"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "Main script has syntax errors"
     fi
 
     if bash -n "${PROJECT_DIR}/lib/utils.sh" 2>/dev/null; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "utils.sh syntax is valid"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "utils.sh has syntax errors"
     fi
 
     if bash -n "${PROJECT_DIR}/lib/config.sh" 2>/dev/null; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "config.sh syntax is valid"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "config.sh has syntax errors"
     fi
 
     if bash -n "${PROJECT_DIR}/lib/checks.sh" 2>/dev/null; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "checks.sh syntax is valid"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "checks.sh has syntax errors"
     fi
 }
@@ -417,56 +417,56 @@ test_benchmark_coverage() {
     # Test SSH benchmarks count (should have at least 10)
     local ssh_count=${#SSH_BENCHMARKS[@]}
     if [[ $ssh_count -ge 10 ]]; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "SSH benchmarks count: $ssh_count (>= 10)"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "SSH benchmarks count: $ssh_count (< 10)"
     fi
 
     # Test kernel benchmarks count (should have at least 15)
     local kernel_count=${#KERNEL_BENCHMARKS[@]}
     if [[ $kernel_count -ge 15 ]]; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "Kernel benchmarks count: $kernel_count (>= 15)"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "Kernel benchmarks count: $kernel_count (< 15)"
     fi
 
     # Test file permission benchmarks count (should have at least 10)
     local file_count=${#FILE_PERM_BENCHMARKS[@]}
     if [[ $file_count -ge 10 ]]; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "File permission benchmarks count: $file_count (>= 10)"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "File permission benchmarks count: $file_count (< 10)"
     fi
 
     # Test disabled services count (should have at least 5)
     local service_count=${#DISABLED_SERVICES[@]}
     if [[ $service_count -ge 5 ]]; then
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_PASSED++)) || true
         if [[ "$VERBOSE" == true ]]; then
             log_success "Disabled services count: $service_count (>= 5)"
         fi
     else
-        ((TESTS_RUN++))
-        ((TESTS_FAILED++))
+        ((TESTS_RUN++)) || true
+        ((TESTS_FAILED++)) || true
         log_error "Disabled services count: $service_count (< 5)"
     fi
 }
@@ -567,6 +567,9 @@ test_input_validation() {
 test_cache_functions() {
     print_test_header "Cache Function Tests"
 
+    # Enable caching for these tests
+    USE_CACHE=true
+
     # Test init_cache creates directory
     init_cache
     assert_true '[[ -d "$CACHE_DIR" ]]' "init_cache creates cache directory"
@@ -614,13 +617,45 @@ test_cache_functions() {
     assert_not_equals "" "$age" "get_cache_age returns value"
 
     # Test cache TTL validation (cache should be valid with default TTL)
-    assert_true 'is_cache_valid 3600' "is_cache_valid returns true for fresh cache"
+    CACHE_TTL=3600
+    assert_true 'is_cache_valid' "is_cache_valid returns true for fresh cache"
 
     # Test is_cache_valid with zero TTL (should always be invalid)
-    assert_false 'is_cache_valid 0' "is_cache_valid returns false for zero TTL"
+    CACHE_TTL=0
+    assert_false 'is_cache_valid' "is_cache_valid returns false for zero TTL"
 
     # Clean up test cache
     rm -f "$CACHE_FILE" 2>/dev/null || true
+}
+
+# Test missing file error handling
+test_missing_file_handling() {
+    print_test_header "Missing File Error Handling Tests"
+
+    # Test that missing lib file causes exit code 1
+    local temp_dir
+    temp_dir=$(mktemp -d)
+
+    # Create a minimal script directory with a missing lib file
+    mkdir -p "${temp_dir}/lib"
+    cp "${PROJECT_DIR}/lib/config.sh" "${temp_dir}/lib/config.sh"
+    cp "${PROJECT_DIR}/lib/utils.sh" "${temp_dir}/lib/utils.sh"
+    # Intentionally omit checks.sh
+
+    cp "${PROJECT_DIR}/hardening-compliance-check.sh" "${temp_dir}/"
+    chmod +x "${temp_dir}/hardening-compliance-check.sh"
+
+    local missing_lib_output
+    missing_lib_output=$("${temp_dir}/hardening-compliance-check.sh" --help 2>&1 || true)
+    assert_true '[[ "$missing_lib_output" == *"not found"* || "$missing_lib_output" == *"FAIL"* ]]' "Missing lib file produces error message"
+
+    # Clean up
+    rm -rf "$temp_dir"
+
+    # Test output to nonexistent directory (use --no-color and a single category for speed)
+    local nonexistent_dir_output
+    nonexistent_dir_output=$("${PROJECT_DIR}/hardening-compliance-check.sh" --no-color -c file_permissions -o /nonexistent/path/output.json -f json 2>&1 || true)
+    assert_true '[[ "$nonexistent_dir_output" == *"not exist"* || "$nonexistent_dir_output" == *"not writable"* || "$nonexistent_dir_output" == *"Failed to write"* ]]' "Output to nonexistent directory produces error"
 }
 
 # Test cache CLI options
@@ -727,6 +762,7 @@ main() {
     test_benchmark_coverage
     test_input_validation
     test_cache_functions
+    test_missing_file_handling
     test_cache_cli
 
     # Print summary

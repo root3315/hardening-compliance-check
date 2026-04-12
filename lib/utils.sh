@@ -568,8 +568,8 @@ init_cache() {
 # Check if cache is enabled and valid
 # Returns 0 if cache should be used, 1 otherwise
 is_cache_valid() {
-    # Check if caching is enabled
-    if [[ "$USE_CACHE" != "true" ]]; then
+    # Check if caching is enabled (default to false if not set)
+    if [[ "${USE_CACHE:-false}" != "true" ]]; then
         return 1
     fi
 
@@ -592,7 +592,7 @@ is_cache_valid() {
     fi
 
     local age=$((current_time - cache_age))
-    if [[ $age -lt $CACHE_TTL ]]; then
+    if [[ $age -lt ${CACHE_TTL:-3600} ]]; then
         return 0
     fi
 
@@ -683,8 +683,8 @@ store_cache_result() {
     local status="$2"
     local details="${3:-}"
 
-    # Check if caching is enabled
-    if [[ "$USE_CACHE" != "true" ]]; then
+    # Check if caching is enabled (default to false if not set)
+    if [[ "${USE_CACHE:-false}" != "true" ]]; then
         return 1
     fi
 
@@ -709,8 +709,8 @@ write_cache_header() {
     local current_time
     current_time=$(timestamp_epoch)
 
-    # Check if caching is enabled
-    if [[ "$USE_CACHE" != "true" ]]; then
+    # Check if caching is enabled (default to false if not set)
+    if [[ "${USE_CACHE:-false}" != "true" ]]; then
         return 1
     fi
 
