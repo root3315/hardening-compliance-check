@@ -72,22 +72,22 @@ check_ssh_config() {
             # Key not present - check if it's a critical setting
             if [[ "$severity" == "$SEVERITY_CRITICAL" || "$severity" == "$SEVERITY_HIGH" ]]; then
                 print_check_result "SSH $key" "fail" "Not configured (expected: $expected)"
-                ((fail_count++))
+                ((fail_count++)) || true
             else
                 print_check_result "SSH $key" "warn" "Not configured"
-                ((skip_count++))
+                ((skip_count++)) || true
             fi
         elif ! validate_config_value "$key" "$current" "$param_type"; then
             # Invalid value format
             print_check_result "SSH $key" "fail" "Invalid format: '$current'"
-            ((fail_count++))
-            ((invalid_count++))
+            ((fail_count++)) || true
+            ((invalid_count++)) || true
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "SSH $key" "pass"
-            ((pass_count++))
+            ((pass_count++)) || true
         else
             print_check_result "SSH $key" "fail" "Current: $current (expected: $expected)"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
@@ -125,6 +125,13 @@ check_kernel_params() {
     print_subheader "Kernel Parameter Checks"
     echo ""
 
+    if [[ ! -f "$SYSCTL_CONFIG" && ! -d /proc/sys ]]; then
+        log_warning "No sysctl configuration found — kernel parameter checks skipped"
+        echo ""
+        store_cache_result "kernel_params" "skip" "No sysctl config found"
+        return $EXIT_SKIP
+    fi
+
     for param in "${!KERNEL_BENCHMARKS[@]}"; do
         local expected="${KERNEL_BENCHMARKS[$param]}"
         local severity="${KERNEL_SEVERITY[$param]}"
@@ -139,22 +146,22 @@ check_kernel_params() {
             # Parameter not available - might be kernel/distro specific
             if [[ "$severity" == "$SEVERITY_CRITICAL" ]]; then
                 print_check_result "Kernel $param" "fail" "Not set (expected: $expected)"
-                ((fail_count++))
+                ((fail_count++)) || true
             else
                 print_check_result "Kernel $param" "skip" "Parameter not available"
-                ((skip_count++))
+                ((skip_count++)) || true
             fi
         elif ! validate_kernel_numeric "$current"; then
             # Invalid value format for kernel parameter
             print_check_result "Kernel $param" "fail" "Invalid format: '$current'"
-            ((fail_count++))
-            ((invalid_count++))
+            ((fail_count++)) || true
+            ((invalid_count++)) || true
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "Kernel $param" "pass"
-            ((pass_count++))
+            ((pass_count++)) || true
         else
             print_check_result "Kernel $param" "fail" "Current: $current (expected: $expected)"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
@@ -199,15 +206,15 @@ check_file_permissions() {
 
         if [[ ! -e "$file" ]]; then
             print_check_result "File $file" "skip" "File does not exist"
-            ((skip_count++))
+            ((skip_count++)) || true
             continue
         fi
 
         # Validate file path before reading
         if ! validate_file_path "$file"; then
             print_check_result "File $file" "fail" "Invalid path format"
-            ((fail_count++))
-            ((invalid_count++))
+            ((fail_count++)) || true
+            ((invalid_count++)) || true
             continue
         fi
 
@@ -215,18 +222,18 @@ check_file_permissions() {
 
         if [[ -z "$current" ]]; then
             print_check_result "File $file" "skip" "Cannot read permissions"
-            ((skip_count++))
+            ((skip_count++)) || true
         elif ! validate_file_permission "$current"; then
             # Invalid permission format
             print_check_result "File $file" "fail" "Invalid format: '$current'"
-            ((fail_count++))
-            ((invalid_count++))
+            ((fail_count++)) || true
+            ((invalid_count++)) || true
         elif [[ "$current" == "$expected" ]]; then
             print_check_result "File $file" "pass"
-            ((pass_count++))
+            ((pass_count++)) || true
         else
             print_check_result "File $file" "fail" "Current: $current (expected: $expected)"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
@@ -259,19 +266,31 @@ check_empty_passwords() {
     print_subheader "Empty Password Check"
     echo ""
 
+    if [[ ! -f /etc/shadow ]]; then
+        log_warning "/etc/shadow not found — skipping empty password check"
+        echo ""
+        store_cache_result "empty_passwords" "skip" "/etc/shadow not found"
+        return $EXIT_SKIP
+    fi
+
+    if [[ ! -r /etc/shadow ]]; then
+        log_warning "/etc/shadow not readable — skipping empty password check (run as root)"
+        echo ""
+        store_cache_result "empty_passwords" "skip" "/etc/shadow not readable"
+        return $EXIT_SKIP
+    fi
+
     local empty_pass_users=0
 
-    if [[ -f /etc/shadow ]]; then
-        while IFS=: read -r username password rest; do
-            if [[ "$password" == "" || "$password" == "!" || "$password" == "*" ]]; then
-                continue
-            fi
-            if [[ "$password" =~ ^!?$ ]]; then
-                ((empty_pass_users++))
-                log_warning "User '$username' has empty or disabled password"
-            fi
-        done < /etc/shadow
-    fi
+    while IFS=: read -r username password rest; do
+        if [[ "$password" == "" || "$password" == "!" || "$password" == "*" ]]; then
+            continue
+        fi
+        if [[ "$password" =~ ^!?$ ]]; then
+            ((empty_pass_users++)) || true
+            log_warning "User '$username' has empty or disabled password"
+        fi
+    done < /etc/shadow
 
     if [[ $empty_pass_users -eq 0 ]]; then
         print_check_result "No empty passwords" "pass"
@@ -290,6 +309,20 @@ check_empty_passwords() {
 check_uid_zero_users() {
     print_subheader "UID 0 User Check"
     echo ""
+
+    if [[ ! -f /etc/passwd ]]; then
+        log_warning "/etc/passwd not found — skipping UID 0 user check"
+        echo ""
+        store_cache_result "uid_zero_users" "skip" "/etc/passwd not found"
+        return $EXIT_SKIP
+    fi
+
+    if [[ ! -r /etc/passwd ]]; then
+        log_warning "/etc/passwd not readable — skipping UID 0 user check"
+        echo ""
+        store_cache_result "uid_zero_users" "skip" "/etc/passwd not readable"
+        return $EXIT_SKIP
+    fi
 
     local uid_zero_users=()
 
@@ -338,28 +371,28 @@ check_password_policy() {
 
         if [[ -z "$current" ]]; then
             print_check_result "Password $key" "warn" "Not configured (recommended: $expected)"
-            ((pass_count++))
+            ((pass_count++)) || true
         elif ! validate_password_numeric "$current"; then
             # Invalid value format
             print_check_result "Password $key" "fail" "Invalid format: '$current'"
-            ((fail_count++))
-            ((invalid_count++))
+            ((fail_count++)) || true
+            ((invalid_count++)) || true
         elif [[ "$key" == "PASS_MAX_DAYS" || "$key" == "PASS_MIN_DAYS" || "$key" == "LOGIN_RETRIES" ]]; then
             # For these, lower or equal is better
             if [[ "$current" -le "$expected" ]]; then
                 print_check_result "Password $key" "pass" "Current: $current"
-                ((pass_count++))
+                ((pass_count++)) || true
             else
                 print_check_result "Password $key" "fail" "Current: $current (max recommended: $expected)"
-                ((fail_count++))
+                ((fail_count++)) || true
             fi
         else
             if [[ "$current" == "$expected" ]]; then
                 print_check_result "Password $key" "pass"
-                ((pass_count++))
+                ((pass_count++)) || true
             else
                 print_check_result "Password $key" "fail" "Current: $current (expected: $expected)"
-                ((fail_count++))
+                ((fail_count++)) || true
             fi
         fi
     done
@@ -396,10 +429,10 @@ check_dangerous_services() {
     for service in "${DISABLED_SERVICES[@]}"; do
         if service_enabled "$service" || service_active "$service"; then
             print_check_result "Service $service disabled" "fail" "Service is active/enabled"
-            ((fail_count++))
+            ((fail_count++)) || true
         else
             print_check_result "Service $service disabled" "pass"
-            ((pass_count++))
+            ((pass_count++)) || true
         fi
     done
 
@@ -431,10 +464,10 @@ check_required_services() {
         if command_exists systemctl; then
             if service_enabled "$service" || service_active "$service"; then
                 print_check_result "Service $service enabled" "pass"
-                ((pass_count++))
+                ((pass_count++)) || true
             else
                 print_check_result "Service $service enabled" "warn" "Service not active"
-                ((fail_count++))
+                ((fail_count++)) || true
             fi
         else
             print_check_result "Service $service" "skip" "systemctl not available"
@@ -465,25 +498,25 @@ check_cron_at_restrictions() {
     # Check cron.allow exists or cron.deny doesn't exist
     if [[ -f "$CRON_ALLOW" ]]; then
         print_check_result "Cron access restricted" "pass" "cron.allow exists"
-        ((pass_count++))
+        ((pass_count++)) || true
     elif [[ -f "$CRON_DENY" ]]; then
         print_check_result "Cron access restricted" "warn" "Using cron.deny instead of cron.allow"
-        ((fail_count++))
+        ((fail_count++)) || true
     else
         print_check_result "Cron access restricted" "fail" "No cron.allow file"
-        ((fail_count++))
+        ((fail_count++)) || true
     fi
 
     # Check at.allow exists or at.deny doesn't exist
     if [[ -f "$AT_ALLOW" ]]; then
         print_check_result "At access restricted" "pass" "at.allow exists"
-        ((pass_count++))
+        ((pass_count++)) || true
     elif [[ -f "$AT_DENY" ]]; then
         print_check_result "At access restricted" "warn" "Using at.deny instead of at.allow"
-        ((fail_count++))
+        ((fail_count++)) || true
     else
         print_check_result "At access restricted" "fail" "No at.allow file"
-        ((fail_count++))
+        ((fail_count++)) || true
     fi
 
     echo ""
@@ -523,10 +556,10 @@ check_world_writable() {
 
     if [[ ${#world_writable_files[@]} -eq 0 ]]; then
         print_check_result "No world-writable system files" "pass"
-        ((pass_count++))
+        ((pass_count++)) || true
     else
         print_check_result "World-writable files found" "fail" "Count: ${#world_writable_files[@]}"
-        ((fail_count++))
+        ((fail_count++)) || true
         for file in "${world_writable_files[@]:0:5}"; do
             echo "    - $file"
         done
@@ -572,10 +605,10 @@ check_unowned_files() {
 
     if [[ ${#unowned_files[@]} -eq 0 ]]; then
         print_check_result "No unowned system files" "pass"
-        ((pass_count++))
+        ((pass_count++)) || true
     else
         print_check_result "Unowned files found" "fail" "Count: ${#unowned_files[@]}"
-        ((fail_count++))
+        ((fail_count++)) || true
         for file in "${unowned_files[@]:0:5}"; do
             echo "    - $file"
         done
@@ -649,10 +682,10 @@ check_suid_sgid() {
 
     if [[ ${#suid_files[@]} -eq 0 ]]; then
         print_check_result "No SUID/SGID in non-standard dirs" "pass"
-        ((pass_count++))
+        ((pass_count++)) || true
     else
         print_check_result "SUID/SGID in non-standard locations" "warn" "Count: ${#suid_files[@]}"
-        ((fail_count++))
+        ((fail_count++)) || true
         for file in "${suid_files[@]:0:5}"; do
             echo "    - $file"
         done
@@ -699,9 +732,9 @@ run_all_checks() {
     check_file_permissions
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # User accounts
@@ -709,25 +742,25 @@ run_all_checks() {
     check_empty_passwords
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_uid_zero_users
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_password_policy
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # SSH hardening
@@ -735,9 +768,9 @@ run_all_checks() {
     check_ssh_config
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # Kernel hardening
@@ -745,9 +778,9 @@ run_all_checks() {
     check_kernel_params
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # Service hardening
@@ -755,25 +788,25 @@ run_all_checks() {
     check_dangerous_services
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_required_services
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_cron_at_restrictions
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # Additional security checks
@@ -781,33 +814,33 @@ run_all_checks() {
     check_world_writable
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_unowned_files
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_suid_sgid
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     check_audit_status
     result=$?
     case $result in
-        0) ((total_pass++)) ;;
-        1) ((total_fail++)) ;;
-        *) ((total_skip++)) ;;
+        0) ((total_pass++)) || true ;;
+        1) ((total_fail++)) || true ;;
+        *) ((total_skip++)) || true ;;
     esac
 
     # Summary

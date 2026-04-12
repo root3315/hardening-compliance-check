@@ -28,6 +28,30 @@ set -euo pipefail
 # Script directory for sourcing modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Verify required library files exist before sourcing
+REQUIRED_LIB_FILES=(
+    "lib/utils.sh"
+    "lib/config.sh"
+    "lib/checks.sh"
+)
+
+for lib_file in "${REQUIRED_LIB_FILES[@]}"; do
+    lib_path="${SCRIPT_DIR}/${lib_file}"
+    if [[ ! -f "$lib_path" ]]; then
+        echo "[FAIL] Required library file not found: ${lib_file}" >&2
+        echo "       Expected at: ${lib_path}" >&2
+        echo "" >&2
+        echo "The hardening-compliance-check script requires all library files" >&2
+        echo "in the lib/ directory. Please ensure the installation is complete." >&2
+        exit 1
+    fi
+    if [[ ! -r "$lib_path" ]]; then
+        echo "[FAIL] Required library file not readable: ${lib_file}" >&2
+        echo "       Expected at: ${lib_path}" >&2
+        exit 1
+    fi
+done
+
 # Source library modules
 source "${SCRIPT_DIR}/lib/utils.sh"
 source "${SCRIPT_DIR}/lib/config.sh"
@@ -421,7 +445,7 @@ main() {
     fi
 
     # Run checks
-    local exit_code
+    local exit_code=0
 
     if [[ -n "$SELECTED_CATEGORY" ]]; then
         print_header "LINUX HARDENING COMPLIANCE CHECK"
@@ -429,11 +453,9 @@ main() {
         echo "  Started: $(timestamp)"
         echo ""
 
-        run_category_checks "$SELECTED_CATEGORY"
-        exit_code=$?
+        run_category_checks "$SELECTED_CATEGORY" || exit_code=$?
     else
-        run_all_checks
-        exit_code=$?
+        run_all_checks || exit_code=$?
     fi
 
     # Calculate duration
@@ -443,18 +465,39 @@ main() {
 
     # Generate output file if specified
     if [[ -n "$OUTPUT_FILE" ]]; then
-        case "$OUTPUT_FORMAT" in
-            json)
-                generate_json_output 0 0 0 0 > "$OUTPUT_FILE"
-                ;;
-            csv)
-                generate_csv_output 0 0 0 > "$OUTPUT_FILE"
-                ;;
-            *)
-                # Text output already printed to stdout
-                log_info "Results written to: $OUTPUT_FILE"
-                ;;
-        esac
+        # Ensure parent directory exists
+        local output_dir
+        output_dir="$(dirname "$OUTPUT_FILE")"
+        if [[ ! -d "$output_dir" ]]; then
+            log_error "Output directory does not exist: $output_dir"
+            exit_code=$EXIT_FAILURE
+        elif [[ ! -w "$output_dir" ]]; then
+            log_error "Output directory is not writable: $output_dir"
+            exit_code=$EXIT_FAILURE
+        else
+            case "$OUTPUT_FORMAT" in
+                json)
+                    if generate_json_output 0 0 0 0 > "$OUTPUT_FILE" 2>/dev/null; then
+                        log_info "Results written to: $OUTPUT_FILE"
+                    else
+                        log_error "Failed to write output file: $OUTPUT_FILE"
+                        exit_code=$EXIT_FAILURE
+                    fi
+                    ;;
+                csv)
+                    if generate_csv_output 0 0 0 > "$OUTPUT_FILE" 2>/dev/null; then
+                        log_info "Results written to: $OUTPUT_FILE"
+                    else
+                        log_error "Failed to write output file: $OUTPUT_FILE"
+                        exit_code=$EXIT_FAILURE
+                    fi
+                    ;;
+                *)
+                    # Text output already printed to stdout
+                    log_info "Results written to: $OUTPUT_FILE"
+                    ;;
+            esac
+        fi
     fi
 
     # Print completion message
